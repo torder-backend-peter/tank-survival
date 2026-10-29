@@ -1,0 +1,12 @@
+{
+  "name": "tank-survival",
+  "owner": {
+    "name": "peter"
+  },
+  "plugins": [
+    {
+      "name": "tank-survival",
+      "source": "./"
+    }
+  ]
+}

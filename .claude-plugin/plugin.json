@@ -1,0 +1,8 @@
+{
+  "name": "tank-survival",
+  "version": "0.1.0",
+  "description": "Claude가 일하는 동안 사무실 사람들과 터미널에서 즐기는 귀여운 탱크 대전",
+  "author": {
+    "name": "peter"
+  }
+}
