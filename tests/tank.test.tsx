@@ -90,8 +90,10 @@ test('hosting draws the game and sends arrow keys to the helper', { timeoutMs: 2
 
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
-    expect((await ui.find({ type: 'Text', text: /남은 탱크/, in: 'game' }))?.text).toBe('⏱ 1:23 · 남은 탱크 2대')
+    expect((await ui.find({ type: 'Text', text: /남은 탱크/, in: 'game' }))?.text).toBe('남은 시간 1:23 · 남은 탱크 2대')
     expect(await ui.find({ type: 'Text', text: /방장/, in: 'game' })).toBeDefined()
+    // 맵의 탱크는 이모지가 아니라 블록 글자로 그린다
+    expect(await ui.find({ type: 'Text', text: '█━', in: 'game' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: '192.168.0.10', in: 'game' })).toBeDefined()
     await ui.key({ key: 'right', in: 'game' })
     await ui.key({ key: ' ', in: 'game' })

@@ -14,6 +14,9 @@ type Conn = {
   // 방이 열렸는지, 들어갔는지, 실패했는지 처음 온 소식
   first: Promise<Message>
   settle: (msg: Message) => void
+  // 통신 프로그램이 끝나면 풀린다
+  done: Promise<void>
+  heartbeat: { cancel: () => void }
 }
 type Message = { t?: string; why?: string; ips?: string[]; port?: number }
 
@@ -92,7 +95,7 @@ function handle($: EngineInterface, mine: Conn, line: string) {
   redraw($)
 }
 
-async function pump($: EngineInterface, mine: Conn) {
+async function pump($: EngineInterface, mine: Conn, finish: () => void) {
   let buf = ''
   try {
     for await (const chunk of mine.stream) {
@@ -110,6 +113,8 @@ async function pump($: EngineInterface, mine: Conn) {
   } catch (err) {
     if (conn === mine) note = `통신 프로그램을 못 띄웠어요. Node가 설치돼 있어야 해요 (${String(err)})`
   }
+  mine.heartbeat.cancel()
+  finish()
   if (conn === mine) {
     conn = null
     view = null
@@ -122,7 +127,10 @@ async function stop($: EngineInterface) {
   if (!c) return
   conn = null
   view = null
+  c.heartbeat.cancel()
   await post($, c.sock, '/quit', {})
+  // 포트를 놓을 때까지 잠깐 기다린다
+  await Promise.race([c.done, $.clock.sleep(2000)])
   try {
     await c.stream.return(undefined as never)
   } catch {
@@ -143,13 +151,19 @@ async function start($: EngineInterface, kind: Kind, target: string, password: s
   const first = new Promise<Message>(resolve => {
     settle = resolve
   })
-  const mine: Conn = { kind, sock, stream, first, settle, password }
+  let finish = () => {}
+  const done = new Promise<void>(resolve => {
+    finish = resolve
+  })
+  // 모드가 살아 있다는 신호. 끊기면 통신 프로그램이 알아서 끝난다
+  const heartbeat = $.clock.every(5000, () => void post($, sock, '/ping', {}))
+  const mine: Conn = { kind, sock, stream, first, settle, password, done, heartbeat }
   conn = mine
   view = null
   address = kind === 'join' ? target : ''
   share = ''
   note = kind === 'host' ? '방을 여는 중...' : '방에 들어가는 중...'
-  void pump($, mine)
+  void pump($, mine, finish)
   redraw($)
 
   return mine
@@ -279,7 +293,7 @@ export const register: Register = on => {
         ))}
         <Text> </Text>
         <Text>내 이름: {name}</Text>
-        <Text dimColor>에너지를 다 잃으면 탈락, 마지막까지 살아남으면 승리 🏆</Text>
+        <Text dimColor>에너지를 다 잃으면 탈락, 마지막까지 살아남으면 승리 ★</Text>
       </Box>
     )
   })

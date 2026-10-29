@@ -20,17 +20,24 @@ const out = msg => process.stdout.write(JSON.stringify(msg) + '\n')
 process.stdout.on('error', () => process.exit(0))
 
 let isShuttingDown = false
+// 방장일 때 연 TCP 방. 끝낼 때 포트를 바로 놓아준다
+let room = null
 function shutdown() {
   if (isShuttingDown) return
   isShuttingDown = true
+  room?.close()
+  for (const p of game.players.values()) p.socket?.destroy()
   try { fs.unlinkSync(opts.sock) } catch {}
   // macOS에서 파이프 쓰기는 비동기라 마지막 줄이 나갈 틈을 준다
   setTimeout(() => process.exit(0), 150)
 }
 process.on('SIGTERM', shutdown)
 process.on('SIGINT', shutdown)
-// Claude Code가 사라지면 같이 끝난다
-setInterval(() => { if (process.ppid === 1) shutdown() }, 2000).unref()
+// Claude Code가 사라지거나 모드가 신호(/ping)를 15초 넘게 안 보내면 같이 끝난다
+let lastPing = Date.now()
+setInterval(() => {
+  if (process.ppid === 1 || Date.now() - lastPing > 15_000) shutdown()
+}, 2000).unref()
 
 // ── 모드와 잇는 다리 ─────────────────────────────────────────────
 
@@ -44,6 +51,7 @@ function startBridge() {
     req.on('end', () => {
       let msg = {}
       try { msg = JSON.parse(body || '{}') } catch {}
+      lastPing = Date.now()
       if (req.url === '/input') bridge.input(msg)
       else if (req.url === '/status') bridge.status(msg)
       res.end('ok')
@@ -190,13 +198,13 @@ function addPlayer(name, socket) {
   game.players.set(p.id, p)
   if (game.phase === 'play' || game.phase === 'end') p.spec = true
   else spawn(p)
-  feed(`👋 ${p.name} 입장!`)
+  feed(`${p.name} 입장!`)
   return p
 }
 
 function removePlayer(p) {
   if (!game.players.delete(p.id)) return
-  feed(`👋 ${p.name} 퇴장`)
+  feed(`${p.name} 퇴장`)
 }
 
 function onInput(p, k) {
@@ -246,7 +254,7 @@ function damage(p, amount, by) {
   p.respawnAt = game.tick + 2 * SEC
   addFx(p.x, p.y, 'dead', 10)
   if (by && by !== p) by.kills++
-  feed(by && by !== p ? `💥 ${by.name} → ${p.name} 펑!` : `💥 ${p.name} 펑!`)
+  feed(by && by !== p ? `${by.name} → ${p.name} 펑!` : `${p.name} 펑!`)
 }
 
 function hitAt(b) {
@@ -293,7 +301,7 @@ function startRound() {
   }
   game.nextItem = game.tick + 4 * SEC
   setPhase('play', ROUND_TICKS)
-  feed('🚩 시작!')
+  feed('시작!')
 }
 
 function endRound(alive) {
@@ -303,9 +311,9 @@ function endRound(alive) {
   game.winner = winner ? winner.id : null
   if (winner) {
     winner.wins++
-    feed(`🏆 ${winner.name} 최후의 생존자!`)
+    feed(`★ ${winner.name} 최후의 생존자!`)
   } else {
-    feed('🤝 무승부!')
+    feed('무승부!')
   }
   game.bullets = []
   setPhase('end', END_TICKS)
@@ -409,7 +417,7 @@ function host() {
   bridge.input = msg => onInput(me, msg.k)
   bridge.status = msg => onStatus(me, msg.c)
 
-  const server = net.createServer(socket => {
+  const server = room = net.createServer(socket => {
     socket.setNoDelay(true)
     let player = null
     const helloTimer = setTimeout(() => { if (!player) socket.destroy() }, 5000)
@@ -435,11 +443,15 @@ function host() {
     socket.on('close', drop)
     socket.on('error', drop)
   })
+  // 방금 닫은 방이 포트를 놓는 중일 수 있어서 3초까지 다시 시도한다
+  let tries = 0
   server.on('error', err => {
+    if (err.code === 'EADDRINUSE' && ++tries < 15) return setTimeout(() => server.listen(port, '0.0.0.0'), 200)
     out({ t: 'error', why: err.code === 'EADDRINUSE' ? `포트 ${port}을 이미 쓰고 있어요. 다른 방이 열려 있는지 확인해주세요` : `방을 못 열었어요: ${err.message}` })
     shutdown()
   })
-  server.listen(port, '0.0.0.0', () => out({ t: 'ready', ips: lanIps(), port }))
+  server.on('listening', () => out({ t: 'ready', ips: lanIps(), port }))
+  server.listen(port, '0.0.0.0')
 
   setInterval(() => {
     step()
