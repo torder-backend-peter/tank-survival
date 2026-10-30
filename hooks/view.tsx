@@ -21,6 +21,9 @@ type Player = {
 }
 type View = {
   ph: string
+  // 맵 크기. 방장이 고른 맵에 따라 다르다
+  w: number
+  h: number
   left: number
   g: string
   p: Player[]
@@ -38,12 +41,12 @@ type View = {
 }
 type Cell = { t: string; c?: string; bg?: string }
 
-const W = 26
-const H = 13
 // 맵 안에는 이모지를 쓰지 않는다. 터미널마다 이모지 폭이 달라 줄이 어긋난다
 // 한 칸은 두 글자. 포탑이 향한 쪽으로 모양이 바뀐다
 const TANK: Record<string, string> = { up: '▟▙', down: '▜▛', left: '━█', right: '█━' }
-const COLORS = ['#ff7eb6', '#ffd23f', '#6bd968', '#5ec8f2', '#ff9b71', '#b388ff', '#f7b267', '#4fd1c5']
+// 벽돌(주황)·강철(회색)·포탄(노랑)과 헷갈리지 않는 색. 들어온 순서대로 쓴다
+// 파랑, 자홍, 민트, 보라, 하양, 청록, 산호, 연두
+const COLORS = ['#3da5ff', '#ff4fd8', '#2ee59d', '#b47cff', '#f8f8f2', '#00c8c8', '#ff7a7a', '#9be15d']
 const ITEMS: Record<string, Cell & { label: string }> = {
   heal: { t: '♥♥', c: '#ff5d8f', label: '에너지' },
   rapid: { t: '≡≡', c: '#ff9f1c', label: '연사' },
@@ -76,6 +79,7 @@ const widthOf = (text: string) =>
 const pad = (text: string, width: number) => text + ' '.repeat(Math.max(0, width - widthOf(text)))
 
 function board(v: View): Cell[][] {
+  const { w: W, h: H } = v
   const rows: Cell[][] = []
   for (let y = 0; y < H; y++) {
     const row: Cell[] = []
@@ -158,8 +162,9 @@ const Game: ClientModule<JsonValue, true> = (props, surface) => {
   const v = props as unknown as View
   const me = v.p.find(p => p.id === v.me)
   const head = headline(v, me)
+  const mapWidth = v.w * 2 + 2
   // 자리 잡기 전에는 폭이 0으로 온다
-  const tooNarrow = typeof v.cols === 'number' && v.cols > 0 && v.cols < W * 2 + 2
+  const tooNarrow = typeof v.cols === 'number' && v.cols > 0 && v.cols < mapWidth
 
   const where = v.role === 'host' && v.addr ? (
     <Text>
@@ -178,7 +183,7 @@ const Game: ClientModule<JsonValue, true> = (props, surface) => {
         {where}
         <Text> </Text>
         <Text bold color="#ff9b71">게임 창이 좁아요</Text>
-        <Text>지금 {v.cols}칸, 맵은 {W * 2 + 2}칸이 필요해요.</Text>
+        <Text>지금 {v.cols}칸, 맵은 {mapWidth}칸이 필요해요.</Text>
         <Text>창 왼쪽 경계를 마우스로 끌어 넓혀주세요. 넓힌 폭은 기억돼요.</Text>
         <Text> </Text>
         <Text color={head.color}>{head.text}</Text>
@@ -189,7 +194,7 @@ const Game: ClientModule<JsonValue, true> = (props, surface) => {
   return (
     <Box flexDirection="column">
       {where}
-      <Box flexDirection="column" borderStyle="round" borderColor={PINK} width={W * 2 + 2}>
+      <Box flexDirection="column" borderStyle="round" borderColor={PINK} width={mapWidth}>
         {board(v).map(row => (
           <Box flexDirection="row">
             {runs(row).map(cell => (

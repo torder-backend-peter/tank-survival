@@ -7,7 +7,7 @@ import http from 'node:http'
 import net from 'node:net'
 import os from 'node:os'
 
-const PROTOCOL = 1
+const PROTOCOL = 2
 const opts = parseArgs(process.argv.slice(2))
 
 function parseArgs(argv) {
@@ -93,10 +93,7 @@ function send(socket, msg) {
 
 const TICK_MS = 80
 const SEC = 1000 / TICK_MS
-const W = 26
-const H = 13
 const MAX_PLAYERS = 8
-const ROUND_TICKS = 120 * SEC
 const COUNT_TICKS = 3 * SEC
 const END_TICKS = 4 * SEC
 const AFK_TICKS = 30 * SEC
@@ -104,20 +101,49 @@ const DIRS = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] }
 const ITEM_KINDS = ['heal', 'rapid', 'shield', 'strong', 'speed']
 
 // 왼쪽 위 반쪽만 그리고 좌우, 위아래로 뒤집어 맵을 만든다. b: 벽돌, s: 강철
-const HALF = [
-  '.............',
-  '.bb..s.......',
-  '.b...s..bbb..',
-  '........b....',
-  '..ss........b',
-  '......bb.....',
-  'bb...s.......',
-]
+// 방장이 고른다. 큰 맵은 아이템이 더 많고 한 판이 조금 길다
+const MAPS = {
+  normal: {
+    h: 13, items: 3, round: 120,
+    half: [
+      '.............',
+      '.bb..s.......',
+      '.b...s..bbb..',
+      '........b....',
+      '..ss........b',
+      '......bb.....',
+      'bb...s.......',
+    ],
+  },
+  big: {
+    h: 17, items: 5, round: 150,
+    half: [
+      '...................',
+      '.bb...s.......bb...',
+      '.b....s........b...',
+      '..........ss.......',
+      '..sss........b.....',
+      '.......bb.......bb.',
+      'bb.....b...s.......',
+      '....s.........bbb..',
+      '..b.....b.....s....',
+    ],
+  },
+}
+const MAP_NAME = MAPS[opts.map] ? opts.map : 'normal'
+const SPEC = MAPS[MAP_NAME]
+const W = SPEC.half[0].length * 2
+const H = SPEC.h
+const ROUND_TICKS = SPEC.round * SEC
 const MAP = (() => {
-  const top = HALF.map(row => row + [...row].reverse().join(''))
-  return [...top, ...top.slice(0, 6).reverse()]
+  const top = SPEC.half.map(row => row + [...row].reverse().join(''))
+  return [...top, ...top.slice(0, H - top.length).reverse()]
 })()
-const SPAWNS = [[0, 0], [25, 12], [25, 0], [0, 12], [12, 0], [13, 12], [6, 6], [19, 6]]
+// 네 모서리, 위아래 가운데, 왼쪽·오른쪽 가운데 줄
+const SPAWNS = [
+  [0, 0], [W - 1, H - 1], [W - 1, 0], [0, H - 1], [W / 2 - 1, 0], [W / 2, H - 1],
+  [Math.floor(W / 4), Math.floor(H / 2)], [W - 1 - Math.floor(W / 4), Math.floor(H / 2)],
+]
 
 const game = {
   tick: 0,
@@ -371,7 +397,7 @@ function step() {
     moveBullets()
     if (t >= game.nextItem) {
       game.nextItem = t + 7 * SEC
-      const spot = game.items.length < 3 ? randomFree() : null
+      const spot = game.items.length < SPEC.items ? randomFree() : null
       if (spot) game.items.push({ x: spot[0], y: spot[1], k: ITEM_KINDS[Math.floor(Math.random() * ITEM_KINDS.length)] })
     }
   }
@@ -383,6 +409,8 @@ function snapshot() {
   return {
     t: 's',
     ph: game.phase,
+    w: W,
+    h: H,
     left: game.phase === 'wait' ? 0 : Math.max(0, Math.ceil((game.phaseEnd - t) / SEC)),
     g: game.grid.map(row => row.join('')).join(''),
     p: [...game.players.values()].map(p => ({
@@ -450,7 +478,7 @@ function host() {
     out({ t: 'error', why: err.code === 'EADDRINUSE' ? `포트 ${port}을 이미 쓰고 있어요. 다른 방이 열려 있는지 확인해주세요` : `방을 못 열었어요: ${err.message}` })
     shutdown()
   })
-  server.on('listening', () => out({ t: 'ready', ips: lanIps(), port }))
+  server.on('listening', () => out({ t: 'ready', ips: lanIps(), port, map: MAP_NAME }))
   server.listen(port, '0.0.0.0')
 
   setInterval(() => {

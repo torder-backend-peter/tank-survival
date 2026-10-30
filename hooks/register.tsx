@@ -5,6 +5,7 @@ const TITLE = '🐾 탱크 서바이벌'
 const PORT = 7777
 
 type Kind = 'host' | 'join'
+type MapName = 'normal' | 'big'
 type ClaudeState = 'idle' | 'working' | 'done'
 type Conn = {
   kind: Kind
@@ -20,8 +21,15 @@ type Conn = {
 }
 type Message = { t?: string; why?: string; ips?: string[]; port?: number }
 
+// 방장이 맵을 고를 때 쓰는 말
+const MAP_WORDS: Record<string, MapName> = {
+  큰맵: 'big', 큰: 'big', big: 'big', large: 'big', 대형: 'big',
+  보통: 'normal', 기본: 'normal', normal: 'normal',
+}
+
 const HELP = [
   '/tank host [비번]       방 만들기 (내가 방장)',
+  '/tank host [비번] 큰맵  넓은 맵으로 방 만들기',
   '/tank join IP [비번]    친구 방 들어가기',
   '/tank name 이름         내 이름 바꾸기',
   '/tank leave             방 나가기',
@@ -63,8 +71,10 @@ function tell($: EngineInterface, path: string, body: unknown) {
   outbox = outbox.then(() => post($, c.sock, path, body))
 }
 
-function openPane($: EngineInterface) {
-  return $.ui.open({ id: PANE, title: TITLE, rows: 30, columns: 60 })
+function openPane($: EngineInterface, map: MapName = 'normal') {
+  return map === 'big'
+    ? $.ui.open({ id: PANE, title: TITLE, rows: 34, columns: 84 })
+    : $.ui.open({ id: PANE, title: TITLE, rows: 30, columns: 60 })
 }
 
 function handle($: EngineInterface, mine: Conn, line: string) {
@@ -139,11 +149,11 @@ async function stop($: EngineInterface) {
   redraw($)
 }
 
-async function start($: EngineInterface, kind: Kind, target: string, password: string) {
+async function start($: EngineInterface, kind: Kind, target: string, password: string, map: MapName = 'normal') {
   await stop($)
   const sock = `/tmp/tank-survival-${crypto.randomUUID().slice(0, 8)}.sock`
   const name = await playerName($)
-  const where = kind === 'host' ? ['--port', String(PORT)] : ['--addr', target]
+  const where = kind === 'host' ? ['--port', String(PORT), '--map', map] : ['--addr', target]
   const stream = $.process.spawn({
     argv: ['node', `${$.plugin.root}/net/tank-net.mjs`, kind, '--sock', sock, '--name', name, '--pw', password, ...where],
   })
@@ -196,14 +206,17 @@ export const register: Register = on => {
     const [sub = '', ...rest] = e.args.trim().split(/\s+/).filter(Boolean)
 
     if (sub === 'host') {
-      const mine = await start($, 'host', '', rest[0] ?? '')
-      await openPane($)
+      // 맵 이름과 비번은 어느 순서로 써도 된다
+      const map = rest.map(word => MAP_WORDS[word]).find(Boolean) ?? 'normal'
+      const password = rest.find(word => !MAP_WORDS[word]) ?? ''
+      const mine = await start($, 'host', '', password, map)
+      await openPane($, map)
       const news = await firstNews($, mine)
       if (news?.t !== 'ready') return { text: `🐾 ${news?.why ?? '방을 여는 중이에요. 열리면 알림으로 방 주소를 알려드릴게요.'}` }
       const copied = await $.ui.copy({ text: share })
       return {
         text: [
-          `🐾 방이 열렸어요! 내 IP: ${address}`,
+          `🐾 ${map === 'big' ? '큰 맵으로 ' : ''}방이 열렸어요! 내 IP: ${address}`,
           `친구에게 이 명령어를 보내주세요${copied.isCopied ? ' (클립보드에 복사해뒀어요)' : ''}:`,
           `  ${share}`,
           '게임 화면을 클릭하면 조작할 수 있어요.',
